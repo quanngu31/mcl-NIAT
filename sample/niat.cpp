@@ -58,14 +58,17 @@ void EQSign(eqsig *s, G1 m[3], const Fr sk[3]) {
 }
 
 bool EQVerify(const G2 pk[3], G1 m[3], eqsig s) {
-    Fp12 e[4];
-    pairing(e[0], m[0], pk[0]);
-    pairing(e[1], m[1], pk[1]);
-    Fp12::mul(e[1], e[0], e[1]);
-    pairing(e[2], m[2], pk[2]);
-    Fp12::mul(e[2], e[1], e[2]);
-    pairing(e[3], s.Z, s.Y2);
-    return (e[2] == e[3]); // e(m1, pk1) * e(m2, pk2) * e(m3, pk3) = e(Z, Y2)
+    Fp12 e1, e2, e3, e4;
+    pairing(e1, m[0], pk[0]);
+    pairing(e2, m[1], pk[1]);
+    Fp12::mul(e2, e1, e2);
+    pairing(e3, m[2], pk[2]);
+    Fp12::mul(e3, e2, e3);
+    pairing(e4, s.Z, s.Y2);
+    pairing(e1, P, s.Y2);
+    pairing(e2, s.Y1, Q);
+    // e(g1, Y2) = e(Y1, g2) & e(m1, pk1) * e(m2, pk2) * e(m3, pk3) = e(Z, Y2)
+    return (e1 == e2 && e3 == e4);
 }
 
 void EQChRep(eqsig *s_, G1 m[3], eqsig s, const Fr mu, const G2 pk[3]) {
