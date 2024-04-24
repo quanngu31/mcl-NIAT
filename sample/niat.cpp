@@ -5,6 +5,9 @@ using namespace mcl::bn;
 G1 P;   // generator g1 of G1
 G2 Q;   // generator g2 of G2
 
+// pre-computed pairings
+Fp12 eC, eI;
+
 struct eqsig {
     G1 Z, Y1;
     G2 Y2;
@@ -71,11 +74,11 @@ bool EQVerify(const G2 pk[3], G1 m[3], eqsig s) {
     return (e1 == e2 && e3 == e4);
 }
 
-void EQChRep(eqsig *s_, G1 m[3], eqsig s, const Fr mu, const G2 pk[3]) {
-    bool ok = EQVerify(pk, m, s);
-    if (!ok) {
-        throw std::runtime_error("EQChRep: cannot verify signature.");
-    }
+void EQChRep(eqsig *s_, eqsig s, const Fr mu) {
+    // bool ok = EQVerify(pk, m, s);
+    // if (!ok) {
+    //     throw std::runtime_error("EQChRep: cannot verify signature.");
+    // }
 
     Fr psi, psi_inv;
     psi.setRand();
@@ -277,11 +280,35 @@ void NIATIssue(G2 pkI[3], niat_psig *psig, Fr skI[3], const G1& pkC, int b) {
     HashtoG1(m[1], psig->r);
     m[2] = psig->T;
 
-    eqsig sig_;
-    EQSign(&sig_, m, skI);
-    psig->sig = sig_;
+    EQSign(&psig->sig, m, skI);
 
     NIZKProve(pkC, pkI, psig, skI, s, b);
+}
+
+bool NIATClientEQVer(const G2 pk[3], G1 m[3], eqsig s) {
+    Fp12 e1, e2, e3, e4;
+    pairing(e2, m[1], pk[1]);
+    Fp12::mul(e2, eC, e2);
+    pairing(e3, m[2], pk[2]);
+    Fp12::mul(e3, e2, e3);
+    pairing(e4, s.Z, s.Y2);
+    pairing(e1, P, s.Y2);
+    pairing(e2, s.Y1, Q);
+    // e(g1, Y2) = e(Y1, g2) & e(m1, pk1) * e(m2, pk2) * e(m3, pk3) = e(Z, Y2)
+    return (e1 == e2 && e3 == e4);
+}
+
+bool NIATIssuerEQVer(const G2 pk[3], G1 m[3], eqsig s) {
+    Fp12 e1, e2, e3, e4;
+    pairing(e2, m[1], pk[1]);
+    Fp12::mul(e2, eI, e2);
+    pairing(e3, m[2], pk[2]);
+    Fp12::mul(e3, e2, e3);
+    pairing(e4, s.Z, s.Y2);
+    pairing(e1, P, s.Y2);
+    pairing(e2, s.Y1, Q);
+    // e(g1, Y2) = e(Y1, g2) & e(m1, pk1) * e(m2, pk2) * e(m3, pk3) = e(Z, Y2)
+    return (e1 == e2 && e3 == e4);
 }
 
 void NIATObtain(niat_token *t, const Fr skC, const G1& pkC, G2 pkI[3], niat_psig psig) {
@@ -291,7 +318,7 @@ void NIATObtain(niat_token *t, const Fr skC, const G1& pkC, G2 pkI[3], niat_psig
     m[1] = Hr;
     m[2] = psig.T;
 
-    if (!EQVerify(pkI, m, psig.sig) || ! NIZKVerify(pkC, pkI, psig)) {
+    if (!NIATClientEQVer(pkI, m, psig.sig) || ! NIZKVerify(pkC, pkI, psig)) {
         throw std::runtime_error("NIATObtain: cannot verify presignature.");
     }
 
@@ -302,13 +329,16 @@ void NIATObtain(niat_token *t, const Fr skC, const G1& pkC, G2 pkI[3], niat_psig
     G1::mul(t->tag[1], psig.T, alpha_inv);
     G1::mul(t->tag[2], psig.S, alpha_inv);
 
-    eqsig sig;
-    EQChRep(&sig, m, psig.sig, alpha_inv, pkI);
-    t->sig = sig;
+    EQChRep(&t->sig, psig.sig, alpha_inv);
 }
 
-int NIATReadBit(Fr skI[3], G2 pkI[3], niat_token t) {
-    if (EQVerify(pkI, t.tag, t.sig)) { return -1; }
+int NIATReadBit(Fr skI[3], G2 pkI[3], niat_token t) { 
+    G1 m[3];
+    m[0] = P;
+    m[1] = t.tag[0];
+    m[2] = t.tag[1];
+
+    if (!NIATIssuerEQVer(pkI, m, t.sig)) { return -1; }
 
     G1 lhs, rhs;
     G1::mul(rhs, P, skI[0]);
@@ -330,22 +360,28 @@ int main() {
     mapToG1(P, 1);
     mapToG2(Q, 1);
 
-    // key genereartion
+    // key generation
     Fr skI[3], skC;
     G1 pkC;
     G2 pkI[3];
     EQKeyGen(skI, pkI); // is also Issuer KeyGen
     NIATClientKeyGen(skC, pkC);
 
+    pairing(eC, pkC, pkI[0]);
+    pairing(eI, P, pkI[0]);
+
     for (int b = 0; b <= 1; b++) {
         niat_psig psig;
         NIATIssue(pkI, &psig, skI, pkC, b);     // issue
-
+    
         niat_token t;
         NIATObtain(&t, skC, pkC, pkI, psig);    // obtain
-
+        
         int b_ = NIATReadBit(skI, pkI, t);      // redeem
-        std::cout << "ReadBit for b = " << b << ": " << (b == b_ ? "ok" : "er") << std::endl;
+        if (!(b == b_)) {
+            std::cout << "Bit extraction invalid: expected " << b << " got " << b_ << std::endl;
+        }
+        else { std::cout << "Bit " << b << "ok" << std::endl; }
     }
 
     return 0;
