@@ -1,12 +1,15 @@
 #include <mcl/bls12_381.hpp>
 
 using namespace mcl::bn;
+using std::vector;
 
 G1 P;   // generator g1 of G1
 G2 Q;   // generator g2 of G2
 
 // pre-computed pairings
-Fp12 eC, eI;
+Fp12 eC, e_pkCm_pkI1m;  // Client
+G1 pkC_m;
+Fp12 eI, e_g1n_pkI1n;   // Issuer
 
 struct eqsig {
     G1 Z, Y1;
@@ -18,8 +21,7 @@ struct niat_token {
     eqsig sig;
 };
 
-struct nizkpf
-{
+struct nizkpf {
     Fr c0, c1, as, a0, a1, a2;
 };
 
@@ -288,7 +290,7 @@ void NIATIssue(G2 pkI[3], niat_psig *psig, Fr skI[3], const G1& pkC, int b) {
 bool NIATClientEQVer(const G2 pk[3], G1 m[3], eqsig s) {
     Fp12 e1, e2, e3, e4;
     pairing(e2, m[1], pk[1]);
-    Fp12::mul(e2, eC, e2);
+    Fp12::mul(e2, eC, e2);      // use the precomputed eC
     pairing(e3, m[2], pk[2]);
     Fp12::mul(e3, e2, e3);
     pairing(e4, s.Z, s.Y2);
@@ -296,12 +298,48 @@ bool NIATClientEQVer(const G2 pk[3], G1 m[3], eqsig s) {
     pairing(e2, s.Y1, Q);
     // e(g1, Y2) = e(Y1, g2) & e(m1, pk1) * e(m2, pk2) * e(m3, pk3) = e(Z, Y2)
     return (e1 == e2 && e3 == e4);
+}
+
+/* Overloaded */
+bool NIATClientEQVer(const G2 pkI[3], vector<vector<G1> > m, vector<eqsig> s, int numTokens) {
+    G1 Y1i; G2 Y2i;
+    // zero out for sum
+    Y1i.clear();
+    Y2i.clear();
+    for (int i=0; i < numTokens; i++) {
+        G1::add(Y1i, Y1i, s[i].Y1);
+        G2::add(Y2i, Y2i, s[i].Y2);
+    }
+    Fp12 e1, e2;
+    pairing(e1, Y1i, Q);
+    pairing(e2, P, Y2i);
+    if (e1 != e2) {     // e(g1, Y2) = e(Y1, g2), but aggregated
+        return false;   // early termination if fails
+    } 
+    // for client
+    // m[0] = Hr;
+    // m[1] = psig.T;
+
+    // e(Z, Y2) = e(m1, pk1) * e(m2, pk2) * e(m3, pk3)
+    
+    Fp12 temp;
+    // set to one for multiplications
+    e1.setOne();    // LHS: e(Z, Y2)
+    e2.setOne();    // RHS: e(m1, pk1) * e(m2, pk2) * e(m3, pk3)
+
+    for (int i=0; i < numTokens; i++) {
+        pairing(temp, s[i].Z, s[i].Y2); e1 *= temp;
+        pairing(temp, m[i][0], pkI[1]); e2 *= temp;
+        pairing(temp, m[i][1], pkI[2]); e2 *= temp;
+    }
+    e2 *= e_pkCm_pkI1m; // pre-computed pairing
+    return (e1 == e2);
 }
 
 bool NIATIssuerEQVer(const G2 pk[3], G1 m[3], eqsig s) {
     Fp12 e1, e2, e3, e4;
     pairing(e2, m[1], pk[1]);
-    Fp12::mul(e2, eI, e2);
+    Fp12::mul(e2, eI, e2);      // use the precomputed eI
     pairing(e3, m[2], pk[2]);
     Fp12::mul(e3, e2, e3);
     pairing(e4, s.Z, s.Y2);
@@ -311,15 +349,57 @@ bool NIATIssuerEQVer(const G2 pk[3], G1 m[3], eqsig s) {
     return (e1 == e2 && e3 == e4);
 }
 
-void NIATObtain(niat_token *t, const Fr skC, const G1& pkC, G2 pkI[3], niat_psig psig) {
+/* Overloaded */
+bool NIATIssuerEQVer(const G2 pkI[3], vector<vector<G1> > m, vector<eqsig> s, int numTokens) {
+    G1 Y1i; G2 Y2i;
+    // zero out for sum
+    G1::mul(Y1i, P, 0);
+    G2::mul(Y2i, Q, 0);
+    for (int i=0; i < numTokens; i++) {
+        G1::add(Y1i, Y1i, s[i].Y1);
+        G2::add(Y2i, Y2i, s[i].Y2);
+    }
+    Fp12 e1, e2;
+    pairing(e1, Y1i, Q);
+    pairing(e2, P, Y2i);
+    if (e1 != e2) {     // e(g1, Y2) = e(Y1, g2), but aggregated
+        return false;   // early termination if fails
+    }
+    // for issuer
+    // m[0] = t.tag[0];
+    // m[1] = t.tag[1];
+
+    // e(Z, Y2) = e(g1, pk1) * e(t1, pk2) * e(t2, pk3)
+
+    Fp12 temp;
+    // set to one for multiplications
+    e1.setOne();    // LHS: e(Z, Y2)
+    e2.setOne();    // RHS: e(m1, pk1) * e(m2, pk2) * e(m3, pk3)
+
+    for (int i=0; i < numTokens; i++) {
+        pairing(temp, s[i].Z, s[i].Y2); e1 *= temp;
+
+        pairing(temp, m[i][0], pkI[1]); e2 *= temp;
+        pairing(temp, m[i][1], pkI[2]); e2 *= temp;
+    }
+    e2 *= e_g1n_pkI1n; // pre-computed pairing
+    return (e1 == e2);
+}
+
+void NIATObtain(niat_token *t, const Fr skC, const G1& pkC, G2 pkI[3], niat_psig psig, bool eqVerified = false) {
     G1 m[3], Hr;
     HashtoG1(Hr, psig.r);
     m[0] = pkC;
     m[1] = Hr;
     m[2] = psig.T;
 
-    if (!NIATClientEQVer(pkI, m, psig.sig) || ! NIZKVerify(pkC, pkI, psig)) {
-        throw std::runtime_error("NIATObtain: cannot verify presignature.");
+    if ( ! eqVerified ) {
+        if ( ! NIATClientEQVer(pkI, m, psig.sig) ) {
+            throw std::runtime_error("NIATObtain: cannot verify presignature.");
+        }
+    }    
+    if ( ! NIZKVerify(pkC, pkI, psig)) {
+        throw std::runtime_error("NIATObtain: cannot verify NIZK.");
     }
 
     Fr alpha_inv;
@@ -332,13 +412,49 @@ void NIATObtain(niat_token *t, const Fr skC, const G1& pkC, G2 pkI[3], niat_psig
     EQChRep(&t->sig, psig.sig, alpha_inv);
 }
 
-int NIATReadBit(Fr skI[3], G2 pkI[3], niat_token t) { 
-    G1 m[3];
-    m[0] = P;
-    m[1] = t.tag[0];
-    m[2] = t.tag[1];
+bool NIATClientBatchVerify(const G2 pkI[3], vector<niat_psig> psigs, int numTokens) {
+    vector<vector<G1> > msgs(numTokens, vector<G1>(2)); 
+    vector<eqsig> sigs(numTokens);
+    
+    // prep values for verification
+    for (int i=0; i < numTokens; i++) {
+        // all pkC's are the same in a batch
+        HashtoG1(msgs[i][0], psigs[i].r);
+        msgs[i][1] = psigs[i].T;
+        sigs[i] = psigs[i].sig;
+    }
+    // verify a batch of tokens
+    if ( ! NIATClientEQVer(pkI, msgs, sigs, numTokens)) {
+        throw std::runtime_error("NIATClientBatchVerify: cannot verify presignatures.");
+    }
+    return true;
+}
 
-    if (!NIATIssuerEQVer(pkI, m, t.sig)) { return -1; }
+bool NIATIssuerBatchVerify(const G2 pkI[3], vector<niat_token> toks, int numTokens) {
+    vector<vector<G1> > msgs(numTokens, vector<G1>(2));
+    vector<eqsig> sigs(numTokens);
+    // prep values for verification
+    for (int i=0; i < numTokens; i++) {
+        // first value is always g1
+        msgs[i][0] = toks[i].tag[0];
+        msgs[i][1] = toks[i].tag[1];
+        sigs[i] = toks[i].sig;
+    }
+    // verify a batch of tokens
+    if ( ! NIATIssuerEQVer(pkI, msgs, sigs, numTokens)) {
+        throw std::runtime_error("NIATIssuerBatchVerify: cannot verify presignatures.");
+    }
+    return true;
+}
+
+int NIATReadBit(Fr skI[3], G2 pkI[3], niat_token t, bool eqVerified = false) { 
+    if ( ! eqVerified ) {
+        G1 m[3];
+        m[0] = P;
+        m[1] = t.tag[0];
+        m[2] = t.tag[1];
+        if ( ! NIATIssuerEQVer(pkI, m, t.sig) ) { return -1; }
+    }
 
     G1 lhs, rhs;
     G1::mul(rhs, P, skI[0]);
@@ -353,20 +469,19 @@ int NIATReadBit(Fr skI[3], G2 pkI[3], niat_token t) {
     return -1;
 }
 
-
 int main() {
     // setup global parameters
     initPairing(mcl::BLS12_381);
     mapToG1(P, 1);
     mapToG2(Q, 1);
 
-    // key generation
+    // simple NIAT
     Fr skI[3], skC;
     G1 pkC;
     G2 pkI[3];
     EQKeyGen(skI, pkI); // is also Issuer KeyGen
     NIATClientKeyGen(skC, pkC);
-
+    // pre-computations
     pairing(eC, pkC, pkI[0]);
     pairing(eI, P, pkI[0]);
 
@@ -384,5 +499,46 @@ int main() {
         else { std::cout << "Bit " << b << "ok" << std::endl; }
     }
 
+    // NIAT with batched verif.
+    int batchSize = 30;
+
+    vector<niat_psig> preSigs(batchSize);
+    vector<niat_token> tokens(batchSize);
+
+    // issue a batch of tokens
+    for (int i=0; i < batchSize; i++) {
+        int b = i % 2;
+        NIATIssue(pkI, &preSigs[i], skI, pkC, b);
+    }
+
+    // pre-compute for batch verif.
+    Fp12::pow(e_pkCm_pkI1m, eC, batchSize);
+    Fp12::pow(e_g1n_pkI1n,  eI, batchSize);
+
+    // client verifies a batch
+    bool success = NIATClientBatchVerify(pkI, preSigs, batchSize);
+    if ( !success ) {
+        std::cout << "uh oh NIAT ClientBatchVerify failed" << std::endl;
+    }
+
+    // client obtains tokens one by one, but skip eqVerify
+    for (int i=0; i < batchSize; i++) {
+        NIATObtain(&tokens[i], skC, pkC, pkI, preSigs[i], success);
+    }
+
+    // client redeems a batch of tokens
+
+    // issuer verifies a batch
+    success = NIATIssuerBatchVerify(pkI, tokens, batchSize);
+    if ( ! success ) {
+        std::cout << "uh oh NIAT IssuerBatchVerify failed" << std::endl;
+    }
+    // issuer reads bit one by one, but skip eqVerify
+    for (int i=0; i < batchSize; i++) {
+        int b_ = NIATReadBit(skI, pkI, tokens[i], success);
+        if (b_ != (i%2) ) {
+            std::cout << "not eq" << std::endl;
+        }
+    }
     return 0;
 }
