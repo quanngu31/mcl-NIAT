@@ -1,3 +1,22 @@
+/*******************************************************************************
+* This is experimental code for Non-interactive Anonymous Tokens
+* Author(s):    Quan Nguyen (@quanngu31)
+*               Aayush Yadav (@aayux)
+********************************************************************************
+*----------------------------------- HOW TO ------------------------------------
+********************************************************************************
+* Follow the steps below to run this file:
+*
+* 1. Clone the repo: 
+* $ git clone https://github.com/aayux/mcl.git
+*
+* 2. Make the exe
+* $ make bin/niat.exe 
+*
+* 3. Execute the exe
+* $ ./bin/niat.exe 
+*******************************************************************************/
+
 #include <mcl/bls12_381.hpp>
 
 using namespace mcl::bn;
