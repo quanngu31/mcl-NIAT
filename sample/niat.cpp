@@ -414,11 +414,11 @@ void NIATObtain(niat_token *t, const Fr skC, const G1& pkC, G2 pkI[3], niat_psig
 
     if ( ! eqVerified ) {
         if ( ! NIATClientEQVer(pkI, m, psig.sig) ) {
-            throw std::runtime_error("NIATObtain: cannot verify presignature.");
+            throw std::runtime_error("ERR <NIATObtain>: cannot verify presignature.");
         }
     }    
     if ( ! NIZKVerify(pkC, pkI, psig)) {
-        throw std::runtime_error("NIATObtain: cannot verify NIZK.");
+        throw std::runtime_error("ERR <NIATObtain>: cannot verify NIZK.");
     }
 
     Fr alpha_inv;
@@ -444,7 +444,7 @@ bool NIATClientBatchVerify(const G2 pkI[3], vector<niat_psig> psigs, int numToke
     }
     // verify a batch of tokens
     if ( ! NIATClientEQVer(pkI, msgs, sigs, numTokens)) {
-        throw std::runtime_error("NIATClientBatchVerify: cannot verify presignatures.");
+        throw std::runtime_error("ERR <NIATClientBatchVerify>: cannot verify presignatures.");
     }
     return true;
 }
@@ -461,7 +461,7 @@ bool NIATIssuerBatchVerify(const G2 pkI[3], vector<niat_token> toks, int numToke
     }
     // verify a batch of tokens
     if ( ! NIATIssuerEQVer(pkI, msgs, sigs, numTokens)) {
-        throw std::runtime_error("NIATIssuerBatchVerify: cannot verify presignatures.");
+        throw std::runtime_error("ERR <NIATIssuerBatchVerify>: cannot verify presignatures.");
     }
     return true;
 }
@@ -513,9 +513,9 @@ int main() {
         
         int b_ = NIATReadBit(skI, pkI, t);      // redeem
         if (!(b == b_)) {
-            std::cout << "Bit extraction invalid: expected " << b << " got " << b_ << std::endl;
+            std::cout << "ERR: bit extraction invalid: expected " << b << " got " << b_ << std::endl;
         }
-        else { std::cout << "Bit " << b << "ok" << std::endl; }
+        else { std::cout << "OK: Bit " << b << " extracted" << std::endl; }
     }
 
     // NIAT with batched verif.
@@ -537,7 +537,7 @@ int main() {
     // client verifies a batch
     bool success = NIATClientBatchVerify(pkI, preSigs, batchSize);
     if ( !success ) {
-        std::cout << "uh oh NIAT ClientBatchVerify failed" << std::endl;
+        std::cout << "ERR: NIAT ClientBatchVerify failed" << std::endl;
     }
 
     // client obtains tokens one by one, but skip eqVerify
@@ -550,13 +550,13 @@ int main() {
     // issuer verifies a batch
     success = NIATIssuerBatchVerify(pkI, tokens, batchSize);
     if ( ! success ) {
-        std::cout << "uh oh NIAT IssuerBatchVerify failed" << std::endl;
+        std::cout << "ERR: NIAT IssuerBatchVerify failed" << std::endl;
     }
     // issuer reads bit one by one, but skip eqVerify
     for (int i=0; i < batchSize; i++) {
         int b_ = NIATReadBit(skI, pkI, tokens[i], success);
-        if (b_ != (i%2) ) {
-            std::cout << "not eq" << std::endl;
+        if (b_ != ( i %2) ) {
+            std::cout << "ERR: bit extraction invalid: expected " << i % 2 << " got " << b_ << std::endl;
         }
     }
     return 0;
