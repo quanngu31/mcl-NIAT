@@ -32,7 +32,7 @@ ifeq ($(CPU),x86-64)
     TEST_SRC+=fp_generator_test.cpp
   endif
 endif
-SAMPLE_SRC=bench.cpp ecdh.cpp random.cpp rawbench.cpp vote.cpp pairing.cpp tri-dh.cpp bls_sig.cpp pairing_c.c she_smpl.cpp mt_test.cpp niat.cpp
+SAMPLE_SRC=bench.cpp ecdh.cpp random.cpp rawbench.cpp vote.cpp pairing.cpp tri-dh.cpp bls_sig.cpp pairing_c.c she_smpl.cpp mt_test.cpp niat.cpp niat_new.cpp
 #SAMPLE_SRC+=large.cpp # rebuild of bint is necessary
 
 ifneq ($(MCL_MAX_BIT_SIZE),)
@@ -516,4 +516,3 @@ install: lib/libmcl.a lib/libmcl.$(LIB_SUF)
 
 # don't remove these files automatically
 .SECONDARY: $(addprefix $(OBJ_DIR)/, $(ALL_SRC:.cpp=.o))
-
