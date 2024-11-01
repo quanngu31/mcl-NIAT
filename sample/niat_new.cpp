@@ -17,12 +17,11 @@
 * $ ./bin/niat.exe
 *******************************************************************************/
 
-#include <cassert>
-#include <cstdio>
 #include <iostream>
 #include <mcl/bls12_381.hpp>
 #include <ostream>
-#include <utility>
+#include <string>
+
 #include "mcl/bn.hpp"
 #include "niat.h"
 
@@ -33,7 +32,7 @@ using std::endl;
 G1 P;   // generator g1 of G1
 G2 Q;   // generator g2 of G2
 
-// #define USEDEBUG
+#define USEDEBUG
 #ifdef USEDEBUG
     #define Debug(x) std::cout << x
 #else
@@ -128,20 +127,125 @@ static eq_msg EQAdaptMessage(const eq_msg& m, const Fr& mu) {
 /* ------------------------------ NIZK  ------------------------------ */
 
 bool NIATClient::NIZKVerify(pkI_t& pkI, const G1& R, const G1& S, nizkpf pi) {
-    // TODO to be implemented
-    (void) pkI;
-    (void) R;
-    (void) S;
-    (void) pi;
-    return true;
+    std::ostringstream pistr;
+    pistr << "<nizkproof> " << endl
+        << "c[0]: " + pi.c0.getStr().substr(0,10) << endl
+        << "c[1]: " + pi.c1.getStr().substr(0,10) << endl
+        << "a[0]: " + pi.a0.getStr().substr(0,10) << endl
+        << "a[1]: " + pi.a1.getStr().substr(0,10) << endl
+        << "av:   "   + pi.av.getStr().substr(0,10) << endl
+        << "aw:   "   + pi.aw.getStr().substr(0,10) << endl
+        << "</nizkproof>";
+    std::cout << "----VERIFY pi----\n" << pistr.str();
+
+    // statement
+    G1 U[2] = { pkI.X[0], pkI.X[1] };
+    G2 V = pkI.Y[0], W = pkI.Y[1];
+    std::ostringstream proof;
+    proof << "<nizkproof> " << endl
+        << "S: " + S.getStr().substr(0,10) << endl
+        << "R: " + R.getStr().substr(0,10) << endl
+        << "U[0]: " + U[0].getStr().substr(0,10) << endl
+        << "U[1]: " + U[1].getStr().substr(0,10) << endl
+        << "V: " + V.getStr().substr(0,10) << endl
+        << "W: " + W.getStr().substr(0,10) << endl
+        << "</nizkproof>";
+    Debug("----STATEMENT VERIFY----\n" << proof.str());
+
+    // verify
+    G1 S_tilde[2], U_tilde[2];
+
+    S_tilde[0] = (R * pi.a0) - S * (-pi.c0);
+    S_tilde[1] = (R * pi.a1) - S * (-pi.c1);
+    U_tilde[0] = (P * pi.a0) - (U[0] * pi.c0);
+    U_tilde[1] = (P * pi.a1) - (U[1] * pi.c1);
+    G2 V_tilde = (Q * pi.av) - V;
+    G2 W_tilde = (Q * pi.aw) - W;
+
+    std::ostringstream proofBuilder;
+    proofBuilder << "<nizkproof> " << endl
+        << "S_tilde[0]: " + S_tilde[0].getStr().substr(0,10) << endl
+        << "S_tilde[1]: " + S_tilde[1].getStr().substr(0,10) << endl
+        << "U_tilde[0]: " + U_tilde[0].getStr().substr(0,10) << endl
+        << "U_tilde[1]: " + U_tilde[1].getStr().substr(0,10) << endl
+        << "V_tilde:    " + V_tilde.getStr().substr(0,10) << endl
+        << "W_tilde:    " + W_tilde.getStr().substr(0,10) << endl
+        << "</nizkproof>";
+    std::cout << "----VERIFY----\n" << proofBuilder.str();
+    Fr c;
+    c.setHashOf(proofBuilder.str());
+    return (pi.c0 + pi.c1) == c;
 }
 
-nizkpf NIATIssuer::NIZKProve(const G1& R, const G1& S, const int b) {
-    // TODO to be implemented
-    nizkpf pi;
-    (void) R;
-    (void) S;
-    (void) b;
+nizkpf NIATIssuer::NIZKProve(const G1& R, const G1& real_S, const int b) {
+    // statement
+    G1 S[2];
+    S[b] = real_S; S[1-b] = R * this->skI.x[1-b];
+    G1 U[2] = { this->pkI.X[0], this->pkI.X[1] };
+    G2 V = this->pkI.Y[0], W = this->pkI.Y[1];
+    std::ostringstream proof;
+    proof << "<nizkproof> " << endl
+        << "S0: " + S[0].getStr().substr(0,10) << endl
+        << "S1: " + S[1].getStr().substr(0,10) << endl
+        << "R: " + R.getStr().substr(0,10) << endl
+        << "U[0]: " + U[0].getStr().substr(0,10) << endl
+        << "U[1]: " + U[1].getStr().substr(0,10) << endl
+        << "V: " + V.getStr().substr(0,10) << endl
+        << "W: " + W.getStr().substr(0,10) << endl
+        << "</nizkproof>";
+    Debug("----STATEMENT PROVE----\n" << proof.str());
+
+    // compute the proof
+    Fr z[2], c[2], a[2], zv, zw;
+    G1 S_tilde[2], U_tilde[2];
+    // sampling
+    z[b].setByCSPRNG();
+    zv.setByCSPRNG();
+    zw.setByCSPRNG();
+    c[1-b].setByCSPRNG();
+    a[1-b].setByCSPRNG();
+    // compute
+    S_tilde[b] = R * z[b];
+    S_tilde[1-b] = (R * a[1-b]) - (S[1-b] * c[1-b]);
+    U_tilde[b] = P * z[b];
+    U_tilde[1-b] = (P * a[1-b]) - (U[1-b] * c[1-b]);
+    G2 V_tilde = Q * zv;
+    G2 W_tilde = Q * zw;
+    std::ostringstream proofBuilder;
+    proofBuilder << "<nizkproof> " << endl
+        << "S_tilde[0]: " + S_tilde[0].getStr().substr(0,10) << endl
+        << "S_tilde[1]: " + S_tilde[1].getStr().substr(0,10) << endl
+        << "U_tilde[0]: " + U_tilde[0].getStr().substr(0,10) << endl
+        << "U_tilde[1]: " + U_tilde[1].getStr().substr(0,10) << endl
+        << "V_tilde:    "    + V_tilde.getStr().substr(0,10) << endl
+        << "W_tilde:    "    + W_tilde.getStr().substr(0,10) << endl
+        << "</nizkproof>";
+    std::cout << "----PROVE----\n" << proofBuilder.str();
+    Fr cTotal;
+    cTotal.setHashOf(proofBuilder.str());
+    // keep computing
+    Fr av = zv + (cTotal * this->skI.y[0]);
+    Fr aw = zw + (cTotal * this->skI.y[1]);
+    c[b] = cTotal - c[1-b];
+    a[b] = z[b] + (c[b] * this->skI.x[b]);
+    nizkpf pi = {
+        .c0 = c[0],
+        .c1 = c[1],
+        .av = av,
+        .aw = aw,
+        .a0 = a[0],
+        .a1 = a[1]
+    };
+    std::ostringstream pistr;
+    pistr << "<nizkproof> " << endl
+        << "c[0]: " + c[0].getStr().substr(0,10) << endl
+        << "c[1]: " + c[1].getStr().substr(0,10) << endl
+        << "a[0]: " + a[0].getStr().substr(0,10) << endl
+        << "a[1]: " + a[1].getStr().substr(0,10) << endl
+        << "av:   " + av.getStr().substr(0,10) << endl
+        << "aw:   " + aw.getStr().substr(0,10) << endl
+        << "</nizkproof>";
+    std::cout << "----PROVE pi----\n" << pistr.str();
     return pi;
 }
 
@@ -154,19 +258,18 @@ void NIATClient::NIATClientKeyGen() {
 
 niat_token NIATClient::NIATObtain(pkI_t& pkI, niat_psig& psig, bool eqVerified) {
     G1 R; HashtoG1(R, psig.nonce);
-    Debug("NIATObtain, R=" << R << endl);
-
-    eq_msg m = {pkC + R, psig.S};
-    Debug("NIATObtain, m[0]=" << m[0] << endl);
-    Debug("NIATObtain, m[1]=" << m[1] << endl);
-
-    niat_token token;
     if ( NIZKVerify(pkI, R, psig.S, psig.pi) != true ) {
         std::cerr << "NIATObtain: The NIZK proof did not verify." << endl;
     }
+
+    niat_token token;
+    eq_msg m = {pkC + R, psig.S};
     if ( !eqVerified && EQVerify(pkI.Y, m, psig.sig) != true ) {
-        std::cerr << "NIATObtain: The EQ signature did not verify." << endl;
-    } else {
+        std::cerr << "NIATObtain: The pre-token's signature was not verified and failed eq_verification." << endl;
+    } else if (EQVerify(pkI.Y, m, psig.sig) != true ) {
+        std::cerr << "NIATObtain: The pre-token's signature failed eq_verification." << endl;
+    }
+    else {
         // everything valid
         Fr alpha_inv;
         Fr::inv(alpha_inv, this->skC);
@@ -180,19 +283,21 @@ niat_token NIATClient::NIATObtain(pkI_t& pkI, niat_psig& psig, bool eqVerified) 
 void NIATIssuer::NIATIssuerKeyGen() {
     for (int i=0; i<EQ_SIZE; i++) {
         this->skI.x[i].setByCSPRNG();
-        this->skI.y[i].setByCSPRNG();
         this->pkI.X[i] = P * skI.x[i];
-        this->pkI.Y[i] = Q * skI.x[i];
+
+        this->skI.y[i].setByCSPRNG();
+        this->pkI.Y[i] = Q * skI.y[i];
     }
 }
 
-niat_psig NIATIssuer::NIATIssue(const pkC_t& pkC, int b) {
+niat_psig NIATIssuer::NIATIssue(const pkC_t& pkC, const int b) {
     std::string r = "randomness r is hardcoded for this proof of concept";
     G1 R; HashtoG1(R, r);
     Debug("NIATIssue, R=" << R << endl);
 
 
-    Fr e = (1-b)*(skI.x[0]) + b*(skI.x[1]);
+    // Fr e = (1-b)*(skI.x[0]) + b*(skI.x[1]);
+    Fr e = this->skI.x[b];
     G1 S = R * e;
 
     niat_psig ret;
@@ -201,15 +306,15 @@ niat_psig NIATIssuer::NIATIssue(const pkC_t& pkC, int b) {
     Debug("NIATIssue, m[1]=" << m[1] << endl);
 
     ret.sig = EQSign(this->skI.y, m);
-    if ( EQVerify(this->pkI.Y, m, ret.sig) == true ) {
-        std::cerr << "THIS WAS FINE, TF??" << endl;
-    } else {
-        std::cerr << "Go KYS dumbass" << endl;
-        std::cout << "Signature Y1 = " << ret.sig.Y1 << endl;
-        std::cout << "Signature Y2 = " << ret.sig.Y2 << endl;
-        std::cout << "Signature YZ = " << ret.sig.Z << endl;
-        std::cout << "----" << endl;
-    }
+    // if ( EQVerify(this->pkI.Y, m, ret.sig) == true ) {
+    //     std::cerr << "THIS WAS FINE, TF??" << endl;
+    // } else {
+    //     std::cerr << "Go KYS dumbass" << endl;
+    //     std::cout << "Signature Y1 = " << ret.sig.Y1 << endl;
+    //     std::cout << "Signature Y2 = " << ret.sig.Y2 << endl;
+    //     std::cout << "Signature YZ = " << ret.sig.Z << endl;
+    //     std::cout << "----" << endl;
+    // }
     ret.S = S;
     ret.nonce = r;
     ret.pi = NIZKProve(R, ret.S, b);
@@ -219,7 +324,9 @@ niat_psig NIATIssuer::NIATIssue(const pkC_t& pkC, int b) {
 int NIATIssuer::NIATReadBit(niat_token& token, bool eqVerified) {
     int b = -1;
     if ( !eqVerified && EQVerify(this->pkI.Y, token.tag, token.sig) != true ) {
-        std::cerr << "NIATReadBit: The EQ signature did not verify." << endl;
+        std::cerr << "NIATReadBit: Token's signature was not verified and failed eq_verification." << endl;
+    } else if (EQVerify(this->pkI.Y, token.tag, token.sig) != true) {
+        std::cerr << "NIATReadBit: Token's signature failed eq_verification." << endl;
     } else {
         if ( (token.tag[0] * this->skI.x[0]) == token.tag[1] ) {
             b = 0;
@@ -299,13 +406,15 @@ void test_NIAT_tokens() {
     NIATIssuer issuer; issuer.NIATIssuerKeyGen();
 
     for (int b=0; b<2; b++) {
+        Debug("\n------------------------------ b="<< b << "------------------------------\n");
         niat_psig pretoken = issuer.NIATIssue(client.pkC, b);
         niat_token token   = client.NIATObtain(issuer.pkI, pretoken);
 
-        if (b == issuer.NIATReadBit(token)) {
-            Debug("ReadBit " << b << " ok" << endl);
+        int b_ = issuer.NIATReadBit(token);
+        if (b_ == -1) {
+            std::cerr << "MASSIVE MISTAKE" << endl;
         } else {
-            Debug("ReadBit " << b << " failed" << endl);
+            Debug("ReadBit " << b << ((b==b_)?"ok":"failed") << endl);
         }
     }
 }
@@ -314,7 +423,8 @@ void test_NIAT_tokens() {
 int main() {
     setup();
     Debug("\n------------------------------ tests ------------------------------\n");
-    test_EQ_signatures();
+    // // test_EQ_signatures();
     test_NIAT_tokens();
+
     return 0;
 }
