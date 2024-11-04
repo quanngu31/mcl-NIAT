@@ -27,7 +27,7 @@ eq_sig  EQChRep(const eq_sig& s, const Fr& mu);
 /* ----------------------------------------------------------------------- */
 
 struct nizkpf {
-    Fr c0, c1, as, a0, a1, a2;
+    Fr c0, c1, av, aw, a0, a1;
 };
 
 struct niat_psig {
