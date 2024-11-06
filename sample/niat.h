@@ -51,17 +51,20 @@ struct pkI_t {
 class NIATClient {
     private:
         Fr skC;
+        // pre-computed values
         Fr skC_inverse;
+        GT e_pk_pkI_x0;     // for obtain
     public:
         pkC_t pkC;
 
     void        NIATClientKeyGen();
-    bool        NIATClientEQVerify(pkI_t& pkI, eq_msg& m, eq_sig& s);
     bool        NIZKVerify(pkI_t& pkI, const G1& R, const G1& S, nizkpf pi);
     niat_token  NIATObtain(pkI_t& pkI, niat_psig& psig, bool eqVerified = false);
     // with batching
-    bool        NIATClientBatchedEQVerify(pkI_t& pkI, vector<eq_msg>& m, vector<eq_sig>& s);
-    bool        NIATClientBatchedPsigVerify(pkI_t& pkI, vector<niat_psig>& psigs);
+    // bool        NIATClientBatchedEQVerify(pkI_t& pkI, vector<eq_msg>& m, vector<eq_sig>& s);
+    // bool        NIATClientBatchedPsigVerify(pkI_t& pkI, vector<niat_psig>& psigs);
+    void        precompute();
+    bool        NIATClientEQVerify(pkI_t& pkI, eq_msg& m, eq_sig& s);
 };
 
 class NIATIssuer {
@@ -70,29 +73,28 @@ class NIATIssuer {
             std::array<Fr,2> x;
             std::array<Fr,2> y;     // for SPS-EQ
         } skI;
+        GT e_g1_X0;
     public:
         pkI_t pkI;
 
     void        NIATIssuerKeyGen();
     niat_psig   NIATIssue(const pkC_t& pkC, int b);
     nizkpf      NIZKProve(const G1& R, const G1& S, const int b);
-    bool        NIATIssuerEQVerify(eq_msg& m, eq_sig& s);
     int         NIATReadBit(niat_token& token, bool eqVerified = false);
     // with batching
-    bool        NIATIssuerBatchedVerify(vector<niat_token>& tokens);
+    // bool        NIATIssuerBatchedVerify(vector<niat_token>& tokens);
+    void        precompute();       // TODO, this opens up a whole can of worms..
+    bool        NIATIssuerEQVerify(eq_msg& m, eq_sig& s);
 };
 
+/* ------------------------------- utils ------------------------------- */
 
-class Precomputations {
-    // pre-computed pairings
-    Fp12 eC, e_pkCm_pkI1m;  // Client
-    G1 pkC_m;
-    Fp12 eI, e_g1n_pkI1n;   // Issuer
-};
-
-// utils
 void HashtoG1(G1& X, const std::string& x) { Fp tmp; tmp.setHashOf(x); mapToG1(X, tmp); }
 
+/*
+ * Public verification algorithm for the _final_ tokens.
+ * Anyone can call this given any public keys and any tokens.
+ */
 bool NIATPublicVerify(pkI_t& pkI, niat_token& token);
 
 #endif /* _NIAT_H */
