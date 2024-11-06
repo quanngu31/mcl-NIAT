@@ -32,7 +32,7 @@ using std::endl;
 G1 P;   // generator g1 of G1
 G2 Q;   // generator g2 of G2
 
-// #define USEDEBUG
+#define USEDEBUG
 #ifdef USEDEBUG
     #define Debug(x) std::cout << x
 #else
@@ -207,33 +207,36 @@ nizkpf NIATIssuer::NIZKProve(const G1& R, const G1& S, const int b) {
 void NIATClient::NIATClientKeyGen() {
     this->skC.setByCSPRNG();
     this->pkC = P * skC;
+    Fr::inv(this->skC_inverse, this->skC);  // pre-compute the inverse
 }
 
 niat_token NIATClient::NIATObtain(pkI_t& pkI, niat_psig& psig, bool eqVerified) {
     G1 R; HashtoG1(R, psig.nonce);
     if ( NIZKVerify(pkI, R, psig.S, psig.pi) != true ) {
         std::cerr << "NIATObtain: The NIZK proof did not verify." << endl;
-    } else {
-        Debug("nizk verify yayyy" << endl);
     }
 
     niat_token token;
-    eq_msg m = {pkC + R, psig.S};
+    eq_msg m = { pkC, (psig.S + R) };
     if ( !eqVerified && EQVerify(pkI.Y, m, psig.sig) != true ) {
         std::cerr << "NIATObtain: The pre-token's signature was not verified and failed eq_verification." << endl;
     } else if (EQVerify(pkI.Y, m, psig.sig) != true ) {
         std::cerr << "NIATObtain: The pre-token's signature failed eq_verification." << endl;
     }
     else {
-        Debug("in obtain, EQ verify also fine!" << endl);
         // everything valid
-        Fr alpha_inv;
-        Fr::inv(alpha_inv, this->skC);
-        token.tag = EQAdaptMessage(m, alpha_inv);
-        token.sig = EQChRep(psig.sig, alpha_inv);
-        if ( EQVerify(pkI.Y, token.tag, token.sig) == true ) {
-            Debug("Immediately after obtain and change rep, EQ Verify is fine" << endl);
-        }
+        eq_msg _tag = { (R * this->skC_inverse), (psig.S * this->skC_inverse) };     // this is not actually a message to any EQ algorithms, but anyway..
+        eq_sig _sig = EQChRep(psig.sig, this->skC_inverse);
+        token.tag = _tag;
+        token.sig = _sig;
+
+        // eq_msg _newmsg = EQAdaptMessage(m, this->skC_inverse);  // we don't need this in the protocol
+        // if ( EQVerify(pkI.Y, _newmsg, sig) == true ) {
+        // if ( NIATPublicVerify(pkI, token) == true ) {
+        //     Debug("--> Immediately after obtain and change rep, EQ Verify is fine" << endl);
+        // } else {
+        //     Debug("--> Immediately after obtain and change rep, EQ Verify FAILED" << endl);
+        // }
     }
     return token;
 }
@@ -252,40 +255,27 @@ void NIATIssuer::NIATIssuerKeyGen() {
 niat_psig NIATIssuer::NIATIssue(const pkC_t& pkC, const int b) {
     std::string r = "randomness r is hardcoded for this proof of concept";
     G1 R; HashtoG1(R, r);
-    // Debug("NIATIssue, R=" << R << endl);
+    G1 S = R * this->skI.x[b];  // use corresponding sk depends on the bit b
 
-
-    // Fr e = (1-b)*(skI.x[0]) + b*(skI.x[1]);
-    Fr e = this->skI.x[b];
-    G1 S = R * e;
-
-    niat_psig ret;
-    eq_msg m = {pkC + R, S};
-    // Debug("NIATIssue, m[0]=" << m[0] << endl);
-    // Debug("NIATIssue, m[1]=" << m[1] << endl);
-
-    ret.sig = EQSign(this->skI.y, m);
-    if ( EQVerify(this->pkI.Y, m, ret.sig) == true ) {
-        std::cerr << "Immediately after issue, EQverify is fine!" << endl;
-    }
-    // else {
-    //     std::cout << "Signature Y1 = " << ret.sig.Y1 << endl;
-    //     std::cout << "Signature Y2 = " << ret.sig.Y2 << endl;
-    //     std::cout << "Signature YZ = " << ret.sig.Z << endl;
-    //     std::cout << "----" << endl;
+    eq_msg m = {pkC, (R + S)};
+    niat_psig ret = {
+        .sig = EQSign(this->skI.y, m),
+        .S = S,
+        .nonce = r,
+        .pi = NIZKProve(R, S, b),
+    };
+    // if ( EQVerify(this->pkI.Y, m, ret.sig) == true ) {
+    //     Debug("Immediately after issue, EQverify is fine!" << endl);
     // }
-    ret.S = S;
-    ret.nonce = r;
-    ret.pi = NIZKProve(R, ret.S, b);
     return ret;
 }
 
 int NIATIssuer::NIATReadBit(niat_token& token, bool eqVerified) {
     int b = -1;
-    if ( !eqVerified && EQVerify(this->pkI.Y, token.tag, token.sig) != true ) {
-        std::cerr << "NIATReadBit: Token's signature was not verified and failed eq_verification." << endl;
-    } else if (EQVerify(this->pkI.Y, token.tag, token.sig) != true) {
-        std::cerr << "NIATReadBit: Token's signature failed eq_verification." << endl;
+    if ( !eqVerified && NIATPublicVerify(pkI, token) != true ) {
+        std::cerr << "NIATReadBit: Token's signature was not verified and failed verification." << endl;
+    } else if ( NIATPublicVerify(pkI, token) != true ) {
+        std::cerr << "NIATReadBit: Token's signature failed verification." << endl;
     } else {
         if ( (token.tag[0] * this->skI.x[0]) == token.tag[1] ) {
             b = 0;
@@ -299,90 +289,77 @@ int NIATIssuer::NIATReadBit(niat_token& token, bool eqVerified) {
 }
 
 bool NIATPublicVerify(pkI_t& pkI, niat_token& token) {
-    eq_msg m = { P + token.tag[0], token.tag[1] };
+    eq_msg m = { P, (token.tag[0] + token.tag[1]) };    // note that messages at different stages are different!
     return EQVerify(pkI.Y, m, token.sig);
 }
 
+/* ------------------------------ tests ------------------------------ */
+void test_EQ_signatures() {
+    Debug("\n------------------------- EQ tests ------------------------\n");
+    eq_sk skEQ;
+    eq_pk pkEQ;
+    EQKeyGen(skEQ, pkEQ);
+
+    eq_msg message;
+    for (int i=0; i<EQ_SIZE; i++) {
+        Fr rand;
+        // rand = i+1;
+        rand.setByCSPRNG();
+        message[i] = P * rand;
+        // Debug("message [" << i << "] = " << message[i] << endl);
+    }
+    // Debug("----" << endl);
+
+    eq_sig signature = EQSign(skEQ, message);
+    // Debug("EQ Sign" << endl);
+    // Debug("Signature Y1 = " << signature.Y1 << endl);
+    // Debug("Signature Y2 = " << signature.Y2 << endl);
+    // Debug("Signature YZ = " << signature.Z << endl);
+    // Debug("----" << endl);
+
+    bool before = EQVerify(pkEQ, message, signature);
+    // Debug("EQ Verify, before changeRep " << (before?"ok":"failed") << endl);
+    // Debug("----" << endl);
+
+    Fr mu; mu.setByCSPRNG();
+    eq_sig newSignature = EQChRep(signature, mu);
+    eq_msg newMessage = EQAdaptMessage(message, mu);
+    bool after = EQVerify(pkEQ, newMessage, newSignature);
+    // Debug("EQ Verify, before changeRep " << (after?"ok":"failed") << endl);
+    Debug("SPS-EQ algorithms: \t" << (before==after ? "ok" : "failed") << endl);
+}
+
+void test_NIAT_tokens() {
+    Debug("\n------------------------- NIAT tests ------------------------\n");
+    NIATClient client; client.NIATClientKeyGen();
+    NIATIssuer issuer; issuer.NIATIssuerKeyGen();
+
+    for (int b=0; b<2; b++) {
+        Debug("\n------------------------- b=" << b << "-------------------------\n");
+        niat_psig pretoken = issuer.NIATIssue(client.pkC, b);
+        niat_token token   = client.NIATObtain(issuer.pkI, pretoken);
+
+        int b_ = issuer.NIATReadBit(token);
+        if (b_ == -1) {
+            std::cerr << "Big error in NIAT protocol!" << endl;
+        } else {
+            Debug("ReadBit: " << b << "\t" << ((b==b_) ? "ok" : "failed") << endl);
+        }
+    }
+}
+
+/* ------------------------------ main ------------------------------ */
 
 /* setup global parameters */
 void setup() {
     initPairing(mcl::BLS12_381);
     mapToG1(P, 1);
     mapToG2(Q, 1);
-
-    Debug("\n----" << endl);
-    Debug("*** generator g1 = " << P << endl);
-    Debug("*** generator g2 = " << Q << endl);
-    Debug("----" << endl);
 }
-
-void test_EQ_signatures() {
-    eq_sk skEQ;
-    eq_pk pkEQ;
-    int success = 0;
-    EQKeyGen(skEQ, pkEQ);
-    for (int i=0; i<100; i++) {
-        for (int i=0; i<EQ_SIZE; i++) {
-            Debug("sk eq [" << i << "] = " << skEQ[i] << endl);
-            Debug("pk eq [" << i << "] = " << pkEQ[i] << endl);
-        }
-        Debug("----" << endl);
-
-        eq_msg message;
-        for (int i=0; i<EQ_SIZE; i++) {
-            Fr rand;
-            // rand = i+1;
-            rand.setByCSPRNG();
-            message[i] = P * rand;
-            Debug("message [" << i << "] = " << message[i] << endl);
-        }
-        Debug("----" << endl);
-
-        eq_sig signature = EQSign(skEQ, message);
-        Debug("EQ Sign" << endl);
-        Debug("Signature Y1 = " << signature.Y1 << endl);
-        Debug("Signature Y2 = " << signature.Y2 << endl);
-        Debug("Signature YZ = " << signature.Z << endl);
-        Debug("----" << endl);
-
-        bool before = EQVerify(pkEQ, message, signature);
-        Debug("EQ Verify, before changeRep " << (before?"ok":"failed") << endl);
-        Debug("----" << endl);
-
-        Fr mu; mu.setByCSPRNG();
-        eq_sig newSignature = EQChRep(signature, mu);
-        eq_msg newMessage = EQAdaptMessage(message, mu);
-        bool after = EQVerify(pkEQ, newMessage, newSignature);
-        Debug("EQ Verify, before changeRep " << (after?"ok":"failed") << endl);
-
-        success += before && after;
-    }
-    std::cout << "success count = " << success << endl;
-}
-
-void test_NIAT_tokens() {
-    NIATClient client; client.NIATClientKeyGen();
-    NIATIssuer issuer; issuer.NIATIssuerKeyGen();
-
-    for (int b=0; b<2; b++) {
-        Debug("\n------------------------------ b="<< b << "------------------------------\n");
-        niat_psig pretoken = issuer.NIATIssue(client.pkC, b);
-        niat_token token   = client.NIATObtain(issuer.pkI, pretoken);
-
-        int b_ = issuer.NIATReadBit(token);
-        if (b_ == -1) {
-            std::cerr << "MASSIVE MISTAKE" << endl;
-        } else {
-            Debug("ReadBit " << b << ((b==b_)?"ok":"failed") << endl);
-        }
-    }
-}
-/* ------------------------------ main ------------------------------ */
 
 int main() {
     setup();
-    Debug("\n------------------------------ tests ------------------------------\n");
-    // // test_EQ_signatures();
+    test_EQ_signatures();
     test_NIAT_tokens();
 
     return 0;

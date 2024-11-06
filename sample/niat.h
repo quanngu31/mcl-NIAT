@@ -51,6 +51,7 @@ struct pkI_t {
 class NIATClient {
     private:
         Fr skC;
+        Fr skC_inverse;
     public:
         pkC_t pkC;
 
@@ -91,5 +92,7 @@ class Precomputations {
 
 // utils
 void HashtoG1(G1& X, const std::string& x) { Fp tmp; tmp.setHashOf(x); mapToG1(X, tmp); }
+
+bool NIATPublicVerify(pkI_t& pkI, niat_token& token);
 
 #endif /* _NIAT_H */
