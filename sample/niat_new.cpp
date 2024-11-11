@@ -201,38 +201,53 @@ void NIATClient::NIATClientKeyGen()
     Fr::inv(this->skC_inverse, this->skC); // pre-compute the inverse
 }
 
-niat_token NIATClient::NIATObtain(const pkI_t &pkI, niat_psig &psig, bool eqVerified)
+/**
+ * wrapper for EQVerify on the client side, using the precomputed e
+ */
+bool NIATClient::NIATClientVerify(const pkI_t &pkI, niat_psig &psig)
+{
+    G1 R;
+    HashtoG1(R, psig.nonce);
+    eq_msg m = {pkC, (psig.S + R)};
+    return EQVerify(pkI.Y, m, psig.sig, this->eC);
+}
+
+/**
+ * Computes the final token
+ */
+niat_token NIATClient::NIATObtain(const pkI_t &pkI, niat_psig &psig)
+{   // assumes that the psig has been checked for validity.
+    (void) pkI;
+    G1 R;
+    HashtoG1(R, psig.nonce);
+    eq_msg _tag = {(R * this->skC_inverse), (psig.S * this->skC_inverse)}; // this is not actually a message to any EQ algorithms, but anyway..
+    eq_sig _sig = EQChRep(psig.sig, this->skC_inverse);
+    niat_token token = {
+        .tag = _tag,
+        .sig = _sig,
+    };
+    return token;
+}
+
+/**
+ * Wraps all the steps in Obtain.
+ */
+niat_token NIATClient::NIATObtainWrapper(const pkI_t &pkI, niat_psig &psig)
 {
     G1 R;
     HashtoG1(R, psig.nonce);
     if (NIZKVerify(pkI, R, psig.S, psig.pi) != true)
     {
-        std::cerr << "NIATObtain: The NIZK proof did not verify." << endl;
+        std::cerr << "NIATObtainWrapper: The NIZK proof did not verify." << endl;
     }
-
     niat_token token;
-    eq_msg m = {pkC, (psig.S + R)};
-    if (!eqVerified && EQVerify(pkI.Y, m, psig.sig, this->eC) != true)
+    if (NIATClientVerify(pkI, psig) == true)
     {
-        std::cerr << "NIATObtain: The pre-token's signature was not verified and failed eq_verification." << endl;
-    }
-    else if (EQVerify(pkI.Y, m, psig.sig, this->eC) != true)
-    {
-        std::cerr << "NIATObtain: The pre-token's signature failed eq_verification." << endl;
+        token = NIATObtain(pkI, psig);
     }
     else
-    {   // everything valid
-        eq_msg _tag = {(R * this->skC_inverse), (psig.S * this->skC_inverse)}; // this is not actually a message to any EQ algorithms, but anyway..
-        eq_sig _sig = EQChRep(psig.sig, this->skC_inverse);
-        token.tag = _tag;
-        token.sig = _sig;
-        // eq_msg _newmsg = EQAdaptMessage(m, this->skC_inverse);  // we don't need this in the protocol
-        // if ( EQVerify(pkI.Y, _newmsg, sig) == true ) {
-        // if ( NIATPublicVerify(pkI, token) == true ) {
-        //     Debug("--> Immediately after obtain and change rep, EQ Verify is fine" << endl);
-        // } else {
-        //     Debug("--> Immediately after obtain and change rep, EQ Verify FAILED" << endl);
-        // }
+    {
+        std::cerr << "NIATObtainWrapper: The pre-token's signature failed eq_verification." << endl;
     }
     return token;
 }
@@ -266,37 +281,35 @@ niat_psig NIATIssuer::NIATIssue(const pkC_t &pkC, const int b)
     return ret;
 }
 
-int NIATIssuer::NIATReadBit(niat_token &token, bool eqVerified)
+/*
+ * wrapper for EQVerify on the issuer side, using the precomputed e
+ */
+bool NIATIssuer::NIATIssuerVerify(niat_token &token)
+{
+    eq_msg m = {P, (token.tag[0] + token.tag[1])};
+    return EQVerify(pkI.Y, m, token.sig, this->eI);
+}
+
+int NIATIssuer::NIATReadBit(niat_token &token)
 {
     int b = -1;
-    // note that eq verify can be performed independently from ReadBit
-
-    eq_msg m = {P, (token.tag[0] + token.tag[1])};
-    if (!eqVerified && EQVerify(pkI.Y, m, token.sig, this->eI) != true)
+    // Token verification can be run independently of ReadBit, ideally in parallel,
+    // so won't be included here
+    if ((token.tag[0] * this->skI.x[0]) == token.tag[1])
     {
-        std::cerr << "NIATReadBit: Token's signature was not verified and failed verification." << endl;
+        b = 0;
     }
-    else if (EQVerify(pkI.Y, m, token.sig, this->eI) != true)
+    else if ((token.tag[0] * this->skI.x[1]) == token.tag[1])
     {
-        std::cerr << "NIATReadBit: Token's signature failed verification." << endl;
+        b = 1;
     }
     else
-    {   // token is valid
-        if ((token.tag[0] * this->skI.x[0]) == token.tag[1])
-        {
-            b = 0;
-        }
-        else if ((token.tag[0] * this->skI.x[1]) == token.tag[1])
-        {
-            b = 1;
-        }
-        else
-        {
-            std::cerr << "NIATReadBit: Error while extracting bit." << endl;
-        }
+    {
+        std::cerr << "NIATReadBit: Error while extracting bit." << endl;
     }
     return b;
 }
+
 
 /* public (but slower) NIAT token verification.
  * client and issuer can do this slightly faster.
@@ -308,7 +321,9 @@ inline bool NIATPublicVerify(pkI_t &pkI, niat_token &token)
     return EQVerify(pkI.Y, m, token.sig);
 }
 
+
 /* ------------------------------ tests ------------------------------ */
+
 void test_EQ_signatures()
 {
     Debug("\n------------------------- EQ tests --------------------------\n");
@@ -322,27 +337,14 @@ void test_EQ_signatures()
         Fr rand;
         rand.setByCSPRNG();
         message[i] = P * rand;
-        // Debug("message [" << i << "] = " << message[i] << endl);
     }
-    // Debug("----" << endl);
-
     eq_sig signature = EQSign(skEQ, message);
-    // Debug("EQ Sign" << endl);
-    // Debug("Signature Y1 = " << signature.Y1 << endl);
-    // Debug("Signature Y2 = " << signature.Y2 << endl);
-    // Debug("Signature YZ = " << signature.Z << endl);
-    // Debug("----" << endl);
-
     bool before = EQVerify(pkEQ, message, signature);
-    // Debug("EQ Verify, before changeRep " << (before?"ok":"failed") << endl);
-    // Debug("----" << endl);
-
     Fr mu;
     mu.setByCSPRNG();
     eq_sig newSignature = EQChRep(signature, mu);
     eq_msg newMessage = EQAdaptMessage(message, mu);
     bool after = EQVerify(pkEQ, newMessage, newSignature);
-    // Debug("EQ Verify, before changeRep " << (after?"ok":"failed") << endl);
     Debug("SPS-EQ algorithms: \t" << (before == after ? "ok" : "failed") << endl);
 }
 
@@ -359,8 +361,30 @@ void test_NIAT_tokens()
     for (int b = 0; b < 2; b++)
     {
         Debug("\n------------------------- b=" << b << " -------------------------------\n");
+        // issue
         niat_psig pretoken = issuer.NIATIssue(client.pkC, b);
-        niat_token token = client.NIATObtain(issuer.pkI, pretoken);
+        
+        Debug("Client obtains.." << endl);
+        // client does the following to obtain
+        niat_token token;
+        {
+            // client
+            G1 R;
+            HashtoG1(R, pretoken.nonce);
+            bool nizkOk = client.NIZKVerify(issuer.pkI, R, pretoken.S, pretoken.pi);
+            bool eqOk = client.NIATClientVerify(issuer.pkI, pretoken);
+            if (nizkOk && eqOk)
+            {
+                token = client.NIATObtain(issuer.pkI, pretoken);
+            }
+        }
+        // all of the steps are wrapped in
+        // niat_token token = client.NIATObtainWrapper(issuer.pkI, pretoken);
+        
+        Debug("Client redeems.." << endl);
+
+        bool tokenOk = issuer.NIATIssuerVerify(token);
+        Debug("Token valid? \t" << (tokenOk?"ok":"invalid") << endl);
 
         int b_ = issuer.NIATReadBit(token);
         if (b_ == -1)
@@ -394,30 +418,55 @@ void test_NIAT_Issuer_batching()
         preTokenBatch.push_back(pretoken);
     }
 
+    // client obtains a batch
     vector<niat_token> tokenBatch;
-    // client obtain one by one
-    for (int i = 0; i < numTokens; i++) {
-        niat_token tok = client.NIATObtain(issuer.pkI, preTokenBatch[i]);
-        tokenBatch.push_back(tok);
+    bool nizkAllOk = true;
+    { 
+        Debug("Client" << endl);
+        // verify NIZK one by one
+        for (int i = 0; i < numTokens; i++) {
+            G1 R;
+            HashtoG1(R, preTokenBatch[i].nonce);
+            bool nizkOk = client.NIZKVerify(issuer.pkI, R, preTokenBatch[i].S, preTokenBatch[i].pi);
+            nizkAllOk = nizkAllOk & nizkOk;
+        }
+        Debug("Pretokens NIZK verified: \t" << (nizkAllOk ? "ok" : "failed") << endl);
+        
+        // batch eq verify
+        bool eqAllOk = client.NIATClientBatchVerify(issuer.pkI, preTokenBatch);
+        Debug("Pretoken batch EQ Verified: \t" << (eqAllOk ? "ok" : "failed") << endl);
+
+        // computes final token one by one.
+        // This can be run independently of eq_verify?
+        if (nizkAllOk && eqAllOk) {
+            for (int i = 0; i < numTokens; i++) {
+                niat_token tok = client.NIATObtain(issuer.pkI, preTokenBatch[i]);
+                tokenBatch.push_back(tok);
+            }   
+        }
     }
-
-    // assume client submits a batch of tokens
     
-    // one thread runs the eq verify
-    bool ok = issuer.NIATIssuerBatchVerify(tokenBatch);
-    Debug("Token batch EQ Verified: " << (ok ? "ok" : "failed") << endl);
+    // assume client submits a batch of tokens
+    // verifier does
+    {
+        Debug("Issuer." << endl);
+        // one thread runs the eq verify
+        bool ok = issuer.NIATIssuerBatchVerify(tokenBatch);
+        Debug("Token batch EQ Verified: \t" << (ok ? "ok" : "failed") << endl);
 
-    // one thread extract the bits
-    for (int i = 0; i < numTokens; i++) {
-        int b_ = issuer.NIATReadBit(tokenBatch[i], true);
-        if (b_ == -1)
-        {
-            std::cerr << "Big error in NIAT protocol!" << endl;
+        // one thread extract the bits
+        for (int i = 0; i < numTokens; i++) {
+            int b_ = issuer.NIATReadBit(tokenBatch[i]);
+            if (b_ == -1)
+            {
+                std::cerr << "Big error in NIAT protocol!" << endl;
+            }
+            else if (b_ != (i % 2))
+            {
+                Debug("test_NIAT_Issuer_batching: token[" << i << "] expects b=" << (i % 2) << " but got " << b_ << endl);
+            }
         }
-        else if (b_ != (i % 2))
-        {
-            Debug("test_NIAT_Issuer_batching: token[" << i << "] expects b=" << (i % 2) << " but got " << b_ << endl);
-        }
+        Debug("No error during bit extraction." << endl);
     }
 }
 
@@ -458,6 +507,10 @@ void NIATIssuer::precompute()
     pairing(this->eI, P, pkI.Y[0]);
 }
 
+/** 
+ * Overloaded EQVerify taking a precomputed pairing.
+ * used by client and issuer.
+*/
 bool EQVerify(const eq_pk &pk, const eq_msg &m, const eq_sig &s, const GT &ePrecomputed)
 {
     if (m.size() != pk.size())
@@ -480,6 +533,10 @@ bool EQVerify(const eq_pk &pk, const eq_msg &m, const eq_sig &s, const GT &ePrec
     return (e1 == e2) && (lhs == rhs);
 }
 
+/** 
+ * Batched version of EQ Verify
+ * 
+*/
 bool EQBatchVerify(const eq_pk &pk, const vector<eq_msg> &msgs, const vector<eq_sig> &sigs, const GT &ePrecomputed)
 {
     if (msgs.size() != sigs.size())
@@ -490,13 +547,14 @@ bool EQBatchVerify(const eq_pk &pk, const vector<eq_msg> &msgs, const vector<eq_
     {
         throw std::runtime_error("EQBatchVerify: Size mismatch between message and public key.");
     }
-    int batchSize = msgs.size(); // n, number of tokens
+    int batchSize = msgs.size(); // n, number of tokens in a batch
 
-    // zero out for sum
-    G1 sum_Y1;
-    sum_Y1.clear();
+    G1 sum_Y1, sum_m1;
     G2 sum_Y2;
+    // zero out for sum
+    sum_Y1.clear();
     sum_Y2.clear();
+    sum_m1.clear();
 
     std::vector<G1> zArray, m1Array;
     std::vector<G2> y2Array, pk1Array;
@@ -504,26 +562,25 @@ bool EQBatchVerify(const eq_pk &pk, const vector<eq_msg> &msgs, const vector<eq_
     {
         sum_Y1 += sigs[i].Y1;
         sum_Y2 += sigs[i].Y2;
-        // TODO, potential extra optimization down here..
+        sum_m1 += msgs[i][1];
         zArray.push_back(sigs[i].Z);
         y2Array.push_back(sigs[i].Y2);
-        m1Array.push_back(msgs[i][1]);
-        pk1Array.push_back(pk[1]); // here, specifically..
     }
     // e(g1, Y2) = e(Y1, g2)
     GT e1, e2;
     pairing(e1, P, sum_Y2);
     pairing(e2, sum_Y1, Q);
-
+    
     // e(m0, pk0) * e(m1, pk1) = e(Z, Y2)
     // |---l1---|   |---l2---|
-    GT l1, l2, rhs;
+    GT l1, l2;
+    GT::pow(l1, ePrecomputed, batchSize);
+    pairing(l2, sum_m1, pk[1]);
+    GT lhs = l1 * l2;
+    
+    GT rhs;
     millerLoopVec(rhs, zArray.data(), y2Array.data(), batchSize);
     finalExp(rhs, rhs);
-    GT::pow(l1, ePrecomputed, batchSize);
-    millerLoopVec(l2, m1Array.data(), pk1Array.data(), batchSize);
-    finalExp(l2, l2);
-    GT lhs = l1 * l2;
 
     return (e1 == e2) && (lhs == rhs);
 }
@@ -533,11 +590,27 @@ bool NIATIssuer::NIATIssuerBatchVerify(vector<niat_token> &tokens)
     vector<eq_msg> msgs;
     vector<eq_sig> sigs;
 
-    for (int i = 0; i < tokens.size(); i++)
+    for (size_t i = 0; i < tokens.size(); i++)
     {
         eq_msg m = {P, (tokens[i].tag[0] + tokens[i].tag[1])};
         msgs.push_back(m);
         sigs.push_back(tokens[i].sig);
     }
     return EQBatchVerify(this->pkI.Y, msgs, sigs, this->eI);
+}
+
+bool NIATClient::NIATClientBatchVerify(const pkI_t &pkI, vector<niat_psig> &psigs)
+{
+    vector<eq_msg> msgs;
+    vector<eq_sig> sigs;
+
+    for (size_t i = 0; i < psigs.size(); i++)
+    {
+        G1 R;
+        HashtoG1(R, psigs[i].nonce);
+        eq_msg m = {pkC, (psigs[i].S + R)};
+        msgs.push_back(m);
+        sigs.push_back(psigs[i].sig);
+    }
+    return EQBatchVerify(pkI.Y, msgs, sigs, this->eC);
 }

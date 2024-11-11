@@ -71,10 +71,11 @@ public:
     void NIATClientKeyGen();
     void precompute(const pkI_t &pkI);
     bool NIZKVerify(const pkI_t &pkI, const G1 &R, const G1 &S, nizkpf pi);
-    niat_token NIATObtain(const pkI_t &pkI, niat_psig &psig, bool eqVerified = false);
-    // with batching
-    // bool NIATClientBatchVerify(pkI_t &pkI, vector<eq_msg> &m, vector<eq_sig> &s);
-    // client does not necessarily need optimizations
+    niat_token NIATObtain(const pkI_t &pkI, niat_psig &psig);
+    niat_token NIATObtainWrapper(const pkI_t &pkI, niat_psig &psig);
+    
+    bool NIATClientVerify(const pkI_t &pkI, niat_psig &psig);
+    bool NIATClientBatchVerify(const pkI_t &pkI, vector<niat_psig> &psigs);
 };
 
 class NIATIssuer
@@ -93,8 +94,9 @@ public:
     void precompute();
     niat_psig NIATIssue(const pkC_t &pkC, int b);
     nizkpf NIZKProve(const G1 &R, const G1 &S, const int b);
-    int NIATReadBit(niat_token &token, bool eqVerified = false);
-    // with batching
+    int NIATReadBit(niat_token &token);
+
+    bool NIATIssuerVerify(niat_token &token);
     bool NIATIssuerBatchVerify(vector<niat_token> &tokens);
 };
 
