@@ -1,5 +1,6 @@
 {
     "files.associations": {
+        "*.y": "yacc",
         "stdexcept": "cpp",
         "array": "cpp",
         "atomic": "cpp",
@@ -51,7 +52,8 @@
         "ostream": "cpp",
         "sstream": "cpp",
         "streambuf": "cpp",
-        "typeinfo": "cpp"
+        "typeinfo": "cpp",
+        "__locale": "cpp"
     },
     "cmake.configureOnOpen": false
 }
