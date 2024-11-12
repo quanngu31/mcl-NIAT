@@ -537,7 +537,7 @@ bool EQVerify(const eq_pk &pk, const eq_msg &m, const eq_sig &s, const GT &ePrec
  * Batched version of EQ Verify
  * 
 */
-bool EQBatchVerify(const eq_pk &pk, const vector<eq_msg> &msgs, const vector<eq_sig> &sigs, const GT &ePrecomputed)
+bool ClientEQBatchVerify(const eq_pk &pk, const vector<eq_msg> &msgs, const vector<eq_sig> &sigs, const GT &ePrecomputed)
 {
     if (msgs.size() != sigs.size())
     {
@@ -585,6 +585,49 @@ bool EQBatchVerify(const eq_pk &pk, const vector<eq_msg> &msgs, const vector<eq_
     return (e1 == e2) && (lhs == rhs);
 }
 
+bool IssuerEQBatchVerify(const eq_pk &pk, const vector<eq_msg> &msgs, const vector<eq_sig> &sigs, const GT &ePrecomputed)
+{
+    if (msgs.size() != sigs.size())
+    {
+        throw std::runtime_error("EQBatchVerify: Size mismatch between message array and signature array.");
+    }
+    else if (msgs[0].size() != pk.size())
+    {
+        throw std::runtime_error("EQBatchVerify: Size mismatch between message and public key.");
+    }
+    int batchSize = msgs.size(); // n, number of tokens in a batch
+
+    G1 sum_Y1;
+    G2 sum_Y2;
+    // zero out for sum
+    sum_Y1.clear();
+    sum_Y2.clear();
+
+    for (int i = 0; i < batchSize; i++)
+    {
+        sum_Y1 += sigs[i].Y1;
+        sum_Y2 += sigs[i].Y2;
+    }
+    // e(g1, Y2) = e(Y1, g2)
+    GT e1, e2;
+    pairing(e1, P, sum_Y2);
+    pairing(e2, sum_Y1, Q);
+
+    GT lhs, l2, rhs;
+    bool flag = true;
+    for (int i = 0; i < batchSize; i++)
+    {
+        // e(m0, pk0) * e(m1, pk1) = e(Z, Y2)
+        // |---l1---|   |---l2---|
+        pairing(l2, msgs[i][1], pk[1]);
+        lhs = ePrecomputed * l2;
+        pairing(rhs, sigs[i].Z, sigs[i].Y2);
+        flag = flag && (lhs == rhs);
+    }
+    
+    return (e1 == e2) && flag;
+}
+
 bool NIATIssuer::NIATIssuerBatchVerify(vector<niat_token> &tokens)
 {
     vector<eq_msg> msgs;
@@ -596,7 +639,7 @@ bool NIATIssuer::NIATIssuerBatchVerify(vector<niat_token> &tokens)
         msgs.push_back(m);
         sigs.push_back(tokens[i].sig);
     }
-    return EQBatchVerify(this->pkI.Y, msgs, sigs, this->eI);
+    return IssuerEQBatchVerify(this->pkI.Y, msgs, sigs, this->eI);
 }
 
 bool NIATClient::NIATClientBatchVerify(const pkI_t &pkI, vector<niat_psig> &psigs)
@@ -612,5 +655,5 @@ bool NIATClient::NIATClientBatchVerify(const pkI_t &pkI, vector<niat_psig> &psig
         msgs.push_back(m);
         sigs.push_back(psigs[i].sig);
     }
-    return EQBatchVerify(pkI.Y, msgs, sigs, this->eC);
+    return ClientEQBatchVerify(pkI.Y, msgs, sigs, this->eC);
 }
