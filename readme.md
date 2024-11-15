@@ -1,17 +1,19 @@
-[![Build Status](https://github.com/herumi/mcl/actions/workflows/main.yml/badge.svg)](https://github.com/herumi/mcl/actions/workflows/main.yml)
+# Non-interactive Anonymous Tokens
 
-# mcl
+This is proof-of-concept implementation for Non-interactive Anonymous Tokens (NIAT). This implementation was built on top of the [mcl library](https://github.com/herumi/mcl).
 
-A portable and fast pairing-based cryptography library.
+**Author(s):** Anonymous Authors
 
-# Abstract
+# How to run the code
 
-mcl is a library for pairing-based cryptography,
-which supports the optimal Ate pairing over BN curves and BLS12-381 curves.
+1. Clone the repo:
 
-# Author
+2. Compile the binary using 
+```bash
+make bin/niat.exe
+```
 
-MITSUNARI Shigeo(herumi@nifty.com)
-
-# Sponsors welcome
-[GitHub Sponsor](https://github.com/sponsors/herumi)
+3. Execute the program
+```bash
+./bin/niat.exe
+```
