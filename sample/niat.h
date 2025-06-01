@@ -9,11 +9,12 @@ using std::vector;
 
 /* ----------------------------------------------------------------------- */
 // EQ signatures
-const int EQ_SIZE = 2;
+const int EQ_SIZE = 3;
 typedef std::array<Fr, EQ_SIZE> eq_sk;
 typedef std::array<G2, EQ_SIZE> eq_pk;
 
 typedef std::array<G1, EQ_SIZE> eq_msg;
+typedef std::array<G1, 2> niat_tag;
 struct eq_sig
 {
     G1 Z, Y1;
@@ -29,7 +30,7 @@ eq_sig  EQChRep(const eq_sig &s, const Fr &mu);
 
 struct nizkpf
 {
-    Fr c0, c1, av, aw, a0, a1;
+    Fr c0, c1, au, av, aw, a0, a1;
 };
 
 struct niat_psig
@@ -42,7 +43,7 @@ struct niat_psig
 
 struct niat_token
 {
-    eq_msg tag;
+    niat_tag tag;
     eq_sig sig;
 };
 
@@ -52,7 +53,7 @@ typedef G1 pkC_t;
 struct pkI_t
 {
     std::array<G1, 2> X;
-    std::array<G2, 2> Y; // for SPS-EQ
+    std::array<G2, 3> Y; // for SPS-EQ
 };
 
 /* ----------------------------------------------------------------------- */
@@ -73,7 +74,7 @@ public:
     bool NIZKVerify(const pkI_t &pkI, const G1 &R, const G1 &S, nizkpf pi);
     niat_token NIATObtain(const pkI_t &pkI, niat_psig &psig);
     niat_token NIATObtainWrapper(const pkI_t &pkI, niat_psig &psig);
-    
+
     bool NIATClientVerify(const pkI_t &pkI, niat_psig &psig);
     bool NIATClientBatchVerify(const pkI_t &pkI, vector<niat_psig> &psigs);
 };
@@ -84,7 +85,7 @@ private:
     struct skI_t
     {
         std::array<Fr, 2> x;
-        std::array<Fr, 2> y; // for SPS-EQ
+        std::array<Fr, 3> y; // for SPS-EQ
     } skI;
     GT eI; // pre-computable, e(g1, pkI^(3)) in paper
 public:

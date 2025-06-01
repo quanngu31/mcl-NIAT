@@ -1,6 +1,6 @@
 /*******************************************************************************
  * This is experimental code for Non-interactive Anonymous Tokens
- * Author(s): 
+ * Author(s):
  *                  Anonymous Authors
  *
  ********************************************************************************
@@ -10,7 +10,7 @@
  *
  * 1. Clone the repo:
  *
- * 2. Make the exe
+ * 2. Compile the binary
  * $ make bin/niat.exe
  *
  * 3. Execute the exe
@@ -82,7 +82,7 @@ bool EQVerify(const eq_pk &pk, const eq_msg &m, const eq_sig &s)
     GT e1, e2;
     pairing(e1, P, s.Y2);
     pairing(e2, s.Y1, Q);
-    // e(m1, pk1) * e(m2, pk2) = e(Z, Y2)
+    // e(m1, pk1) * e(m2, pk2) * e(m3, pk3)= e(Z, Y2)
     GT lhs, rhs;
     millerLoopVec(lhs, m.data(), pk.data(), EQ_SIZE); // this does exactly what lhs needs
     finalExp(lhs, lhs);                               // how finalExp is used internally in the library
@@ -118,15 +118,16 @@ static eq_msg EQAdaptMessage(const eq_msg &m, const Fr &mu)
 bool NIATClient::NIZKVerify(const pkI_t &pkI, const G1 &R, const G1 &S, nizkpf pi)
 {
     // statement
-    G1 U[2] = {pkI.X[0], pkI.X[1]};
-    G2 V = pkI.Y[0], W = pkI.Y[1];
+    G1 T[2] = {pkI.X[0], pkI.X[1]};
+    G2 U = pkI.Y[0], V = pkI.Y[1], W = pkI.Y[2];
     // compute to verify
-    G1 S_tilde[2], U_tilde[2];
+    G1 S_tilde[2], T_tilde[2];
     S_tilde[0] = (R * pi.a0) - (S * pi.c0);
     S_tilde[1] = (R * pi.a1) - (S * pi.c1);
-    U_tilde[0] = (P * pi.a0) - (U[0] * pi.c0);
-    U_tilde[1] = (P * pi.a1) - (U[1] * pi.c1);
+    T_tilde[0] = (P * pi.a0) - (T[0] * pi.c0);
+    T_tilde[1] = (P * pi.a1) - (T[1] * pi.c1);
     Fr c = pi.c0 + pi.c1;
+    G2 U_tilde = (Q * pi.au) - (U * c);
     G2 V_tilde = (Q * pi.av) - (V * c);
     G2 W_tilde = (Q * pi.aw) - (W * c);
     // transcript
@@ -134,8 +135,9 @@ bool NIATClient::NIZKVerify(const pkI_t &pkI, const G1 &R, const G1 &S, nizkpf p
     transcript << "<nizkproof> " << endl
                << "S_tilde[0]: " + S_tilde[0].getStr() << endl
                << "S_tilde[1]: " + S_tilde[1].getStr() << endl
-               << "U_tilde[0]: " + U_tilde[0].getStr() << endl
-               << "U_tilde[1]: " + U_tilde[1].getStr() << endl
+               << "T_tilde[0]: " + T_tilde[0].getStr() << endl
+               << "T_tilde[1]: " + T_tilde[1].getStr() << endl
+               << "U_tilde:    " + U_tilde.getStr() << endl
                << "V_tilde:    " + V_tilde.getStr() << endl
                << "W_tilde:    " + W_tilde.getStr() << endl
                << "</nizkproof>";
@@ -147,13 +149,14 @@ bool NIATClient::NIZKVerify(const pkI_t &pkI, const G1 &R, const G1 &S, nizkpf p
 nizkpf NIATIssuer::NIZKProve(const G1 &R, const G1 &S, const int b)
 {
     // statement
-    G1 U[2] = {this->pkI.X[0], this->pkI.X[1]};
-    G2 V = this->pkI.Y[0], W = this->pkI.Y[1];
+    G1 T[2] = {this->pkI.X[0], this->pkI.X[1]};
+    G2 U = this->pkI.Y[0], V = this->pkI.Y[1], W = this->pkI.Y[2];
     // compute the proof
-    Fr z[2], c[2], a[2], zv, zw;
-    G1 S_tilde[2], U_tilde[2];
+    Fr z[2], c[2], a[2], zu, zv, zw;
+    G1 S_tilde[2], T_tilde[2];
     // sampling
     z[b].setByCSPRNG();
+    zu.setByCSPRNG();
     zv.setByCSPRNG();
     zw.setByCSPRNG();
     c[1 - b].setByCSPRNG();
@@ -161,8 +164,9 @@ nizkpf NIATIssuer::NIZKProve(const G1 &R, const G1 &S, const int b)
     // compute
     S_tilde[b] = R * z[b];
     S_tilde[1 - b] = (R * a[1 - b]) - (S * c[1 - b]);
-    U_tilde[b] = P * z[b];
-    U_tilde[1 - b] = (P * a[1 - b]) - (U[1 - b] * c[1 - b]);
+    T_tilde[b] = P * z[b];
+    T_tilde[1 - b] = (P * a[1 - b]) - (T[1 - b] * c[1 - b]);
+    G2 U_tilde = Q * zu;
     G2 V_tilde = Q * zv;
     G2 W_tilde = Q * zw;
     // transcript
@@ -170,21 +174,24 @@ nizkpf NIATIssuer::NIZKProve(const G1 &R, const G1 &S, const int b)
     transcript << "<nizkproof> " << endl
                << "S_tilde[0]: " + S_tilde[0].getStr() << endl
                << "S_tilde[1]: " + S_tilde[1].getStr() << endl
-               << "U_tilde[0]: " + U_tilde[0].getStr() << endl
-               << "U_tilde[1]: " + U_tilde[1].getStr() << endl
+               << "T_tilde[0]: " + T_tilde[0].getStr() << endl
+               << "T_tilde[1]: " + T_tilde[1].getStr() << endl
+               << "U_tilde:    " + U_tilde.getStr() << endl
                << "V_tilde:    " + V_tilde.getStr() << endl
                << "W_tilde:    " + W_tilde.getStr() << endl
                << "</nizkproof>";
     Fr cTotal;
     cTotal.setHashOf(transcript.str());
     // keep computing
-    Fr av = zv + (cTotal * this->skI.y[0]);
-    Fr aw = zw + (cTotal * this->skI.y[1]);
+    Fr au = zu + (cTotal * this->skI.y[0]);
+    Fr av = zv + (cTotal * this->skI.y[1]);
+    Fr aw = zw + (cTotal * this->skI.y[2]);
     c[b] = cTotal - c[1 - b];
     a[b] = z[b] + (c[b] * this->skI.x[b]);
     nizkpf pi = {
         .c0 = c[0],
         .c1 = c[1],
+        .au = au,
         .av = av,
         .aw = aw,
         .a0 = a[0],
@@ -208,7 +215,7 @@ bool NIATClient::NIATClientVerify(const pkI_t &pkI, niat_psig &psig)
 {
     G1 R;
     HashtoG1(R, psig.nonce);
-    eq_msg m = {pkC, (psig.S + R)};
+    eq_msg m = {pkC, R, psig.S};
     return EQVerify(pkI.Y, m, psig.sig, this->eC);
 }
 
@@ -220,7 +227,7 @@ niat_token NIATClient::NIATObtain(const pkI_t &pkI, niat_psig &psig)
     (void) pkI;
     G1 R;
     HashtoG1(R, psig.nonce);
-    eq_msg _tag = {(R * this->skC_inverse), (psig.S * this->skC_inverse)}; // this is not actually a message to any EQ algorithms, but anyway..
+    niat_tag _tag = {(R * this->skC_inverse), (psig.S * this->skC_inverse)};
     eq_sig _sig = EQChRep(psig.sig, this->skC_inverse);
     niat_token token = {
         .tag = _tag,
@@ -254,7 +261,7 @@ niat_token NIATClient::NIATObtainWrapper(const pkI_t &pkI, niat_psig &psig)
 
 void NIATIssuer::NIATIssuerKeyGen()
 {
-    for (int i = 0; i < EQ_SIZE; i++)
+    for (int i = 0; i < 2; i++)
     {
         this->skI.x[i].setByCSPRNG();
         this->pkI.X[i] = P * skI.x[i];
@@ -262,6 +269,8 @@ void NIATIssuer::NIATIssuerKeyGen()
         this->skI.y[i].setByCSPRNG();
         this->pkI.Y[i] = Q * skI.y[i];
     }
+    this->skI.y[2].setByCSPRNG();
+    this->pkI.Y[2] = Q * skI.y[2];
 }
 
 niat_psig NIATIssuer::NIATIssue(const pkC_t &pkC, const int b)
@@ -271,7 +280,7 @@ niat_psig NIATIssuer::NIATIssue(const pkC_t &pkC, const int b)
     HashtoG1(R, r);
     G1 S = R * this->skI.x[b]; // use corresponding sk depends on the bit b
 
-    eq_msg m = {pkC, (R + S)};
+    eq_msg m = {pkC, R, S};
     niat_psig ret = {
         .sig = EQSign(this->skI.y, m),
         .S = S,
@@ -286,7 +295,7 @@ niat_psig NIATIssuer::NIATIssue(const pkC_t &pkC, const int b)
  */
 bool NIATIssuer::NIATIssuerVerify(niat_token &token)
 {
-    eq_msg m = {P, (token.tag[0] + token.tag[1])};
+    eq_msg m = {P, token.tag[0], token.tag[1]};
     return EQVerify(pkI.Y, m, token.sig, this->eI);
 }
 
@@ -316,7 +325,7 @@ int NIATIssuer::NIATReadBit(niat_token &token)
  */
 inline bool NIATPublicVerify(pkI_t &pkI, niat_token &token)
 {
-    eq_msg m = {P, (token.tag[0] + token.tag[1])};
+    eq_msg m = {P, token.tag[0], token.tag[1]};
     // note that messages at different stages are different!
     return EQVerify(pkI.Y, m, token.sig);
 }
@@ -363,7 +372,7 @@ void test_NIAT_tokens()
         Debug("\n------------------------- b=" << b << " -------------------------------\n");
         // issue
         niat_psig pretoken = issuer.NIATIssue(client.pkC, b);
-        
+
         Debug("Client obtains.." << endl);
         // client does the following to obtain
         niat_token token;
@@ -373,6 +382,8 @@ void test_NIAT_tokens()
             HashtoG1(R, pretoken.nonce);
             bool nizkOk = client.NIZKVerify(issuer.pkI, R, pretoken.S, pretoken.pi);
             bool eqOk = client.NIATClientVerify(issuer.pkI, pretoken);
+            Debug("NIZK verified? \t" << (nizkOk ? "ok" : "failed") << endl);
+            Debug("EQ verified? \t" << (eqOk ? "ok" : "failed") << endl);
             if (nizkOk && eqOk)
             {
                 token = client.NIATObtain(issuer.pkI, pretoken);
@@ -380,7 +391,7 @@ void test_NIAT_tokens()
         }
         // all of the steps are wrapped in
         // niat_token token = client.NIATObtainWrapper(issuer.pkI, pretoken);
-        
+
         Debug("Client redeems.." << endl);
 
         bool tokenOk = issuer.NIATIssuerVerify(token);
@@ -421,7 +432,7 @@ void test_NIAT_Issuer_batching()
     // client obtains a batch
     vector<niat_token> tokenBatch;
     bool nizkAllOk = true;
-    { 
+    {
         Debug("Client" << endl);
         // verify NIZK one by one
         for (int i = 0; i < numTokens; i++) {
@@ -431,7 +442,7 @@ void test_NIAT_Issuer_batching()
             nizkAllOk = nizkAllOk & nizkOk;
         }
         Debug("Pretokens NIZK verified: \t" << (nizkAllOk ? "ok" : "failed") << endl);
-        
+
         // batch eq verify
         bool eqAllOk = client.NIATClientBatchVerify(issuer.pkI, preTokenBatch);
         Debug("Pretoken batch EQ Verified: \t" << (eqAllOk ? "ok" : "failed") << endl);
@@ -442,10 +453,10 @@ void test_NIAT_Issuer_batching()
             for (int i = 0; i < numTokens; i++) {
                 niat_token tok = client.NIATObtain(issuer.pkI, preTokenBatch[i]);
                 tokenBatch.push_back(tok);
-            }   
+            }
         }
     }
-    
+
     // assume client submits a batch of tokens
     // verifier does
     {
@@ -507,7 +518,7 @@ void NIATIssuer::precompute()
     pairing(this->eI, P, pkI.Y[0]);
 }
 
-/** 
+/**
  * Overloaded EQVerify taking a precomputed pairing.
  * used by client and issuer.
 */
@@ -522,20 +533,21 @@ bool EQVerify(const eq_pk &pk, const eq_msg &m, const eq_sig &s, const GT &ePrec
     pairing(e1, P, s.Y2);
     pairing(e2, s.Y1, Q);
 
-    // e(m1, pk1) * e(m2, pk2) = e(Z, Y2)
+    // e(m1, pk1) * e(m2, pk2) * e(m3, pk3) = e(Z, Y2)
     // |---l1---|   |---l2---|
     // l1 can be pre-computed by client/issuer
     // and we know EQ_SIZE = 2 elements in the msg/pk arrays
-    GT l2, rhs;
+    GT l2, l3, rhs;
     pairing(l2, m[1], pk[1]);
-    GT lhs = ePrecomputed * l2;
+    pairing(l3, m[2], pk[2]);
+    GT lhs = ePrecomputed * l2 * l3;
     pairing(rhs, s.Z, s.Y2);
     return (e1 == e2) && (lhs == rhs);
 }
 
-/** 
+/**
  * Batched version of EQ Verify
- * 
+ *
 */
 bool ClientEQBatchVerify(const eq_pk &pk, const vector<eq_msg> &msgs, const vector<eq_sig> &sigs, const GT &ePrecomputed)
 {
@@ -549,12 +561,13 @@ bool ClientEQBatchVerify(const eq_pk &pk, const vector<eq_msg> &msgs, const vect
     }
     int batchSize = msgs.size(); // n, number of tokens in a batch
 
-    G1 sum_Y1, sum_m1;
+    G1 sum_Y1, sum_m1, sum_m2;
     G2 sum_Y2;
     // zero out for sum
     sum_Y1.clear();
     sum_Y2.clear();
     sum_m1.clear();
+    sum_m2.clear();
 
     std::vector<G1> zArray, m1Array;
     std::vector<G2> y2Array, pk1Array;
@@ -563,6 +576,7 @@ bool ClientEQBatchVerify(const eq_pk &pk, const vector<eq_msg> &msgs, const vect
         sum_Y1 += sigs[i].Y1;
         sum_Y2 += sigs[i].Y2;
         sum_m1 += msgs[i][1];
+        sum_m2 += msgs[i][2];
         zArray.push_back(sigs[i].Z);
         y2Array.push_back(sigs[i].Y2);
     }
@@ -570,14 +584,15 @@ bool ClientEQBatchVerify(const eq_pk &pk, const vector<eq_msg> &msgs, const vect
     GT e1, e2;
     pairing(e1, P, sum_Y2);
     pairing(e2, sum_Y1, Q);
-    
-    // e(m0, pk0) * e(m1, pk1) = e(Z, Y2)
+
+    // e(m0, pk0) * e(m1, pk1) * e(m2, pk2) = e(Z, Y2)
     // |---l1---|   |---l2---|
-    GT l1, l2;
+    GT l1, l2, l3;
     GT::pow(l1, ePrecomputed, batchSize);
     pairing(l2, sum_m1, pk[1]);
-    GT lhs = l1 * l2;
-    
+    pairing(l3, sum_m2, pk[2]);
+    GT lhs = l1 * l2 * l3;
+
     GT rhs;
     millerLoopVec(rhs, zArray.data(), y2Array.data(), batchSize);
     finalExp(rhs, rhs);
@@ -613,18 +628,19 @@ bool IssuerEQBatchVerify(const eq_pk &pk, const vector<eq_msg> &msgs, const vect
     pairing(e1, P, sum_Y2);
     pairing(e2, sum_Y1, Q);
 
-    GT lhs, l2, rhs;
+    GT lhs, l2, l3, rhs;
     bool flag = true;
     for (int i = 0; i < batchSize; i++)
     {
         // e(m0, pk0) * e(m1, pk1) = e(Z, Y2)
         // |---l1---|   |---l2---|
         pairing(l2, msgs[i][1], pk[1]);
-        lhs = ePrecomputed * l2;
+        pairing(l3, msgs[i][2], pk[2]);
+        lhs = ePrecomputed * l2 * l3;
         pairing(rhs, sigs[i].Z, sigs[i].Y2);
         flag = flag && (lhs == rhs);
     }
-    
+
     return (e1 == e2) && flag;
 }
 
@@ -635,7 +651,7 @@ bool NIATIssuer::NIATIssuerBatchVerify(vector<niat_token> &tokens)
 
     for (size_t i = 0; i < tokens.size(); i++)
     {
-        eq_msg m = {P, (tokens[i].tag[0] + tokens[i].tag[1])};
+        eq_msg m = {P, tokens[i].tag[0], tokens[i].tag[1]};
         msgs.push_back(m);
         sigs.push_back(tokens[i].sig);
     }
@@ -651,7 +667,7 @@ bool NIATClient::NIATClientBatchVerify(const pkI_t &pkI, vector<niat_psig> &psig
     {
         G1 R;
         HashtoG1(R, psigs[i].nonce);
-        eq_msg m = {pkC, (psigs[i].S + R)};
+        eq_msg m = {pkC, R, psigs[i].S};
         msgs.push_back(m);
         sigs.push_back(psigs[i].sig);
     }

@@ -10,9 +10,9 @@ The source code that you would be interested in are [niat.cpp](sample/niat.cpp) 
 
 1. Clone the repo:
 
-2. Compile the binary using 
+2. When you are the top-level directory of the project, meaning don't `cd` into any sub directory, compile the binary for `niat` with
 ```bash
-make bin/niat.exe
+mkdir bin; make bin/niat.exe
 ```
 
 3. Execute the program
